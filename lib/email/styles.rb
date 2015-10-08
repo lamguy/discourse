@@ -131,7 +131,7 @@ module Email
       style('a', 'text-decoration: none; font-weight: bold; color: #006699;')
       style('ul', 'margin: 0 0 0 10px; padding: 0 0 0 20px;')
       style('li', 'padding-bottom: 10px')
-      style('div.digest-post', 'margin-left: 15px; margin-top: 20px; max-width: 694px;')
+      style('div.digest-post', 'margin-left: 15px; margin-top: -5px; max-width: 694px;')
       style('div.digest-post h1', 'font-size: 20px;')
       style('div.footer', 'color:#666; font-size:95%; text-align:center; padding-top:15px;')
       style('span.post-count', 'margin: 0 5px; color: #777;')
@@ -159,13 +159,16 @@ module Email
     end
 
     def strip_avatars_and_emojis
-      @fragment.css('img').each do |img|
+      @fragment.search('img').each do |img|
         if img['src'] =~ /_avatar/
           img.parent['style'] = "vertical-align: top;" if img.parent.name == 'td'
           img.remove
         end
 
-        img.replace(img['title']) if (img['src'] =~ /images\/emoji/ || img['src'] =~ /uploads\/default\/_emoji/)
+        if img['title'] && (img['src'] =~ /images\/emoji/ || img['src'] =~ /uploads\/default\/_emoji/)
+          img.add_previous_sibling(img['title'] || "emoji")
+          img.remove
+        end
       end
 
       @fragment.to_s

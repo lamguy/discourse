@@ -2,8 +2,14 @@ require 'uri'
 require_dependency 'slug'
 
 class TopicLink < ActiveRecord::Base
-  MAX_DOMAIN_LENGTH = 100 unless defined? MAX_DOMAIN_LENGTH
-  MAX_URL_LENGTH = 500 unless defined? MAX_URL_LENGTH
+
+  def self.max_domain_length
+    100
+  end
+
+  def self.max_url_length
+    500
+  end
 
   belongs_to :topic
   belongs_to :user
@@ -133,7 +139,7 @@ class TopicLink < ActiveRecord::Base
             topic_id = nil unless topic
 
             if topic.present?
-              url = "#{Discourse.base_url}#{topic.relative_url}"
+              url = "#{Discourse.base_url_no_prefix}#{topic.relative_url}"
               url << "/#{post_number}" if post_number.to_i > 1
             end
 
@@ -147,8 +153,8 @@ class TopicLink < ActiveRecord::Base
             reflected_post = Post.find_by(topic_id: topic_id, post_number: post_number.to_i)
           end
 
-          next if url && url.length > MAX_URL_LENGTH
-          next if parsed && parsed.host && parsed.host.length > MAX_DOMAIN_LENGTH
+          url = url[0...TopicLink.max_url_length]
+          next if parsed && parsed.host && parsed.host.length > TopicLink.max_domain_length
 
           added_urls << url
           TopicLink.create(post_id: post.id,
@@ -168,7 +174,7 @@ class TopicLink < ActiveRecord::Base
 
             if topic && post.topic && post.topic.archetype != 'private_message' && topic.archetype != 'private_message'
 
-              prefix = Discourse.base_url
+              prefix = Discourse.base_url_no_prefix
 
               reflected_url = "#{prefix}#{post.topic.relative_url(post.post_number)}"
 
@@ -231,7 +237,8 @@ end
 #
 # Indexes
 #
-#  index_topic_links_on_post_id   (post_id)
-#  index_topic_links_on_topic_id  (topic_id)
-#  unique_post_links              (topic_id,post_id,url) UNIQUE
+#  index_topic_links_on_link_post_id_and_reflection  (link_post_id,reflection)
+#  index_topic_links_on_post_id                      (post_id)
+#  index_topic_links_on_topic_id                     (topic_id)
+#  unique_post_links                                 (topic_id,post_id,url) UNIQUE
 #

@@ -1,3 +1,5 @@
+import DiscourseURL from 'discourse/lib/url';
+
 export default {
   trackClick(e) {
     // cancel click if triggered as part of selection.
@@ -73,6 +75,13 @@ export default {
       $link.data('auto-route', true);
     }
 
+    // restore href
+    setTimeout(() => {
+      $link.removeClass('no-href');
+      $link.attr('href', $link.data('href'));
+      $link.data('href', null);
+    }, 50);
+
     // warn the user if they can't download the file
     if (Discourse.SiteSettings.prevent_anons_from_downloading_files && $link.hasClass("attachment") && !Discourse.User.current()) {
       bootbox.alert(I18n.t("post.errors.attachment_download_requires_login"));
@@ -80,7 +89,7 @@ export default {
     }
 
     // If we're on the same site, use the router and track via AJAX
-    if (Discourse.URL.isInternal(href) && !$link.hasClass('attachment')) {
+    if (DiscourseURL.isInternal(href) && !$link.hasClass('attachment')) {
       Discourse.ajax("/clicks/track", {
         data: {
           url: href,
@@ -90,23 +99,16 @@ export default {
         },
         dataType: 'html'
       });
-      Discourse.URL.routeTo(href);
+      DiscourseURL.routeTo(href);
       return false;
     }
-
-    // restore href
-    setTimeout(function() {
-      $link.removeClass('no-href');
-      $link.attr('href', $link.data('href'));
-      $link.data('href', null);
-    }, 50);
 
     // Otherwise, use a custom URL with a redirect
     if (Discourse.User.currentProp('external_links_in_new_tab')) {
       var win = window.open(trackingUrl, '_blank');
       win.focus();
     } else {
-      Discourse.URL.redirectTo(trackingUrl);
+      DiscourseURL.redirectTo(trackingUrl);
     }
 
     return false;

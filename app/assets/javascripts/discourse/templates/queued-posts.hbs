@@ -6,7 +6,6 @@
           {{#user-link user=ctrl.post.user}}
             {{avatar ctrl.post.user imageSize="large"}}
           {{/user-link}}
-
         </div>
         <div class='cooked'>
           <div class='names'>
@@ -14,6 +13,9 @@
               {{#user-link user=ctrl.post.user}}
                 {{ctrl.post.user.username}}
               {{/user-link}}
+              {{#if ctrl.post.user.blocked}}
+              <i class='fa fa-ban' title='{{i18n "user.blocked_tooltip"}}'></i>
+              {{/if}}
             </span>
           </div>
           <div class='post-info'>
@@ -50,7 +52,6 @@
                          icon="times"
                          disabled=ctrl.post.isSaving
                          class="btn-danger cancel"}}
-
             {{else}}
               {{d-button action="approve"
                          disabled=ctrl.post.isSaving
@@ -62,6 +63,13 @@
                          label="queue.reject"
                          icon="times"
                          class="btn-danger reject"}}
+              {{#if ctrl.post.can_delete_user}}
+                {{d-button action="deleteUser"
+                           disabled=ctrl.post.isSaving
+                           label="queue.delete_user"
+                           icon="trash"
+                           class="btn-danger delete-user"}}
+              {{/if}}
               {{d-button action="edit"
                          disabled=ctrl.post.isSaving
                          label="queue.edit"
@@ -75,5 +83,7 @@
     {{else}}
       <p>{{i18n "queue.none"}}</p>
     {{/each}}
+
+    {{d-button action="refresh" label="refresh" icon="refresh" disabled=model.refreshing id='refresh-queued'}}
   </div>
 </div>

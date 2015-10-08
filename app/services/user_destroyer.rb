@@ -19,6 +19,10 @@ class UserDestroyer
     raise PostsExistError if !opts[:delete_posts] && user.posts.count != 0
 
     User.transaction do
+
+      Draft.where(user_id: user.id).delete_all
+      QueuedPost.where(user_id: user.id).delete_all
+
       if opts[:delete_posts]
         user.posts.each do |post|
           # agree with flags

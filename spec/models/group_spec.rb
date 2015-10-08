@@ -292,7 +292,7 @@ describe Group do
     let(:group) {Fabricate(:group)}
 
     it "by default has no managers" do
-      group.managers.should be_empty
+      expect(group.managers).to be_empty
     end
 
     it "multiple managers can be appointed" do
@@ -309,6 +309,18 @@ describe Group do
       group.appoint_manager(u)
       expect(Guardian.new(u).can_edit?(group)).to be_truthy
     end
+  end
+
+  it "correctly grants a trust level to members" do
+    group = Fabricate(:group, grant_trust_level: 2)
+    u0 = Fabricate(:user, trust_level: 0)
+    u3 = Fabricate(:user, trust_level: 3)
+
+    group.add(u0)
+    expect(u0.reload.trust_level).to eq(2)
+
+    group.add(u3)
+    expect(u3.reload.trust_level).to eq(3)
   end
 
 end

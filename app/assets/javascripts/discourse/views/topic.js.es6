@@ -3,11 +3,13 @@ import AddArchetypeClass from 'discourse/mixins/add-archetype-class';
 import ClickTrack from 'discourse/lib/click-track';
 import { listenForViewEvent } from 'discourse/lib/app-events';
 import { categoryBadgeHTML } from 'discourse/helpers/category-link';
+import Scrolling from 'discourse/mixins/scrolling';
 
-var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Discourse.Scrolling, {
+const TopicView = Ember.View.extend(AddCategoryClass, AddArchetypeClass, Scrolling, {
   templateName: 'topic',
   topicBinding: 'controller.model',
-  userFiltersBinding: 'controller.userFilters',
+
+  userFilters: Ember.computed.alias('controller.model.userFilters'),
   classNameBindings: ['controller.multiSelect:multi-select',
                       'topic.archetype',
                       'topic.is_warning',
@@ -19,12 +21,12 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
 
   categoryFullSlug: Em.computed.alias('topic.category.fullSlug'),
 
-  postStream: Em.computed.alias('controller.postStream'),
+  postStream: Em.computed.alias('controller.model.postStream'),
 
   archetype: Em.computed.alias('topic.archetype'),
 
   _composeChanged: function() {
-    var composerController = Discourse.get('router.composerController');
+    const composerController = Discourse.get('router.composerController');
     composerController.clearState();
     composerController.set('topic', this.get('topic'));
   }.observes('composer'),
@@ -33,7 +35,7 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
     // Ember is supposed to only call observers when values change but something
     // in our view set up is firing this observer with the same value. This check
     // prevents scrolled from being called twice.
-    var enteredAt = this.get('controller.enteredAt');
+    const enteredAt = this.get('controller.enteredAt');
     if (enteredAt && (this.get('lastEnteredAt') !== enteredAt)) {
       this.scrolled();
       this.set('lastEnteredAt', enteredAt);
@@ -43,17 +45,18 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
   _inserted: function() {
     this.bindScrolling({name: 'topic-view'});
 
-    var self = this;
-    $(window).on('resize.discourse-on-scroll', function() {
-      self.scrolled();
-    });
+    $(window).on('resize.discourse-on-scroll', () => this.scrolled());
 
     this.$().on('mouseup.discourse-redirect', '.cooked a, a.track-link', function(e) {
-      var selection = window.getSelection && window.getSelection();
       // bypass if we are selecting stuff
-      if (selection.type === "Range" || selection.rangeCount > 0) { return true; }
+      const selection = window.getSelection && window.getSelection();
+      if (selection.type === "Range" || selection.rangeCount > 0) {
+        if (Discourse.Utilities.selectedText() !== "") {
+          return true;
+        }
+      }
 
-      var $target = $(e.target);
+      const $target = $(e.target);
       if ($target.hasClass('mention') || $target.parents('.expanded-embed').length) { return false; }
 
       return ClickTrack.trackClick(e);
@@ -76,7 +79,7 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
 
   }.on('willDestroyElement'),
 
-  gotFocus: function(){
+  gotFocus: function() {
     if (Discourse.get('hasFocus')){
       this.scrolled();
     }
@@ -89,20 +92,16 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
   offset: 0,
   hasScrolled: Em.computed.gt("offset", 0),
 
-  /**
-    The user has scrolled the window, or it is finished rendering and ready for processing.
+  // The user has scrolled the window, or it is finished rendering and ready for processing.
+  scrolled() {
 
-    @method scrolled
-  **/
-  scrolled: function(){
-
-    if(this.isDestroyed || this.isDestroying) {
+    if (this.isDestroyed || this.isDestroying || this._state !== 'inDOM') {
       return;
     }
 
-    var offset = window.pageYOffset || $('html').scrollTop();
+    const offset = window.pageYOffset || $('html').scrollTop();
     if (!this.get('docAt')) {
-      var title = $('#topic-title');
+      const title = $('#topic-title');
       if (title && title.length === 1) {
         this.set('docAt', title.offset().top);
       }
@@ -110,8 +109,8 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
 
     this.set("offset", offset);
 
-    var headerController = this.get('controller.controllers.header'),
-        topic = this.get('controller.model');
+    const headerController = this.get('controller.controllers.header'),
+          topic = this.get('controller.model');
     if (this.get('docAt')) {
       headerController.set('showExtraInfo', offset >= this.get('docAt') || topic.get('postStream.firstPostNotLoaded'));
     } else {
@@ -121,10 +120,6 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
     // Trigger a scrolled event
     this.appEvents.trigger('topic:scrolled', offset);
   },
-
-  topicTrackingState: function() {
-    return Discourse.TopicTrackingState.current();
-  }.property(),
 
   browseMoreMessage: function() {
     var opts = { latestLink: "<a href=\"" + Discourse.getURL("/latest") + "\">" + I18n.t("topic.view_latest_topics") + "</a>" },
@@ -140,12 +135,12 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
       opts.catLink = "<a href=\"" + Discourse.getURL("/categories") + "\">" + I18n.t("topic.browse_all_categories") + "</a>";
     }
 
-    var tracking = this.get('topicTrackingState'),
-        unreadTopics = tracking.countUnread(),
-        newTopics = tracking.countNew();
+    const tracking = this.get('topicTrackingState'),
+          unreadTopics = tracking.countUnread(),
+          newTopics = tracking.countNew();
 
     if (newTopics + unreadTopics > 0) {
-      var hasBoth = unreadTopics > 0 && newTopics > 0;
+      const hasBoth = unreadTopics > 0 && newTopics > 0;
 
       return I18n.messageFormat("topic.read_more_MF", {
         "BOTH": hasBoth,
@@ -155,8 +150,7 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
         latestLink: opts.latestLink,
         catLink: opts.catLink
       });
-    }
-    else if (category) {
+    } else if (category) {
       return I18n.t("topic.read_more_in_category", opts);
     } else {
       return I18n.t("topic.read_more", opts);
@@ -165,13 +159,13 @@ var TopicView = Discourse.View.extend(AddCategoryClass, AddArchetypeClass, Disco
 });
 
 function highlight(postNumber) {
-  var $contents = $('#post_' + postNumber +' .topic-body'),
-      origColor = $contents.data('orig-color') || $contents.css('backgroundColor');
+  const $contents = $('#post_' + postNumber +' .topic-body'),
+        origColor = $contents.data('orig-color') || $contents.css('backgroundColor');
 
   $contents.data("orig-color", origColor)
     .addClass('highlighted')
     .stop()
-    .animate({ backgroundColor: origColor }, 2500, 'swing', function(){
+    .animate({ backgroundColor: origColor }, 2500, 'swing', function() {
       $contents.removeClass('highlighted');
       $contents.css({'background-color': ''});
     });

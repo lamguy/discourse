@@ -40,8 +40,9 @@ class ApplicationController < ActionController::Base
   before_filter :block_if_readonly_mode
   before_filter :authorize_mini_profiler
   before_filter :preload_json
-  before_filter :check_xhr
   before_filter :redirect_to_login_if_required
+  before_filter :check_xhr
+  after_filter  :add_readonly_header
 
   layout :set_layout
 
@@ -51,6 +52,10 @@ class ApplicationController < ActionController::Base
 
   def use_crawler_layout?
     @use_crawler_layout ||= (has_escaped_fragment? || CrawlerDetection.crawler?(request.user_agent))
+  end
+
+  def add_readonly_header
+    response.headers['Discourse-Readonly'] = 'true' if Discourse.readonly_mode?
   end
 
   def slow_platform?
@@ -71,17 +76,12 @@ class ApplicationController < ActionController::Base
 
   # If they hit the rate limiter
   rescue_from RateLimiter::LimitExceeded do |e|
+    render_json_error e.description, type: :rate_limit, status: 429
+  end
 
-    time_left = ""
-    if e.available_in < 1.minute.to_i
-      time_left = I18n.t("rate_limiter.seconds", count: e.available_in)
-    elsif e.available_in < 1.hour.to_i
-      time_left = I18n.t("rate_limiter.minutes", count: (e.available_in / 1.minute.to_i))
-    else
-      time_left = I18n.t("rate_limiter.hours", count: (e.available_in / 1.hour.to_i))
-    end
-
-    render_json_error I18n.t("rate_limiter.too_many_requests", time_left: time_left), type: :rate_limit, status: 429
+  rescue_from PG::ReadOnlySqlTransaction do |e|
+    Discourse.received_readonly!
+    raise Discourse::ReadOnly
   end
 
   rescue_from Discourse::NotLoggedIn do |e|
@@ -134,7 +134,9 @@ class ApplicationController < ActionController::Base
   def set_current_user_for_logs
     if current_user
       Logster.add_to_env(request.env,"username",current_user.username)
+      response.headers["X-Discourse-Username"] = current_user.username
     end
+    response.headers["X-Discourse-Route"] = "#{controller_name}/#{action_name}"
   end
 
   def set_locale
@@ -143,6 +145,8 @@ class ApplicationController < ActionController::Base
                   else
                     SiteSetting.default_locale
                   end
+
+    I18n.fallbacks.ensure_loaded!
   end
 
   def store_preloaded(key, json)
@@ -158,6 +162,10 @@ class ApplicationController < ActionController::Base
     # We don't preload JSON on xhr or JSON request
     return if request.xhr? || request.format.json?
 
+    # if we are posting in makes no sense to preload
+    return if request.method != "GET"
+
+    # TODO should not be invoked on redirection so this should be further deferred
     preload_anonymous_data
 
     if current_user
@@ -198,6 +206,10 @@ class ApplicationController < ActionController::Base
     @guardian ||= Guardian.new(current_user)
   end
 
+  def current_homepage
+    current_user ? SiteSetting.homepage : SiteSetting.anonymous_homepage
+  end
+
   def serialize_data(obj, serializer, opts=nil)
     # If it's an array, apply the serializer as an each_serializer to the elements
     serializer_opts = {scope: guardian}.merge!(opts || {})
@@ -219,7 +231,14 @@ class ApplicationController < ActionController::Base
 
   def render_json_dump(obj, opts=nil)
     opts ||= {}
-    obj['__rest_serializer'] = "1" if opts[:rest_serializer]
+    if opts[:rest_serializer]
+      obj['__rest_serializer'] = "1"
+      opts.each do |k, v|
+        obj[k] = v if k.to_s.start_with?("refresh_")
+      end
+    end
+
+
     render json: MultiJson.dump(obj), status: opts[:status] || 200
   end
 
@@ -242,9 +261,10 @@ class ApplicationController < ActionController::Base
       find_opts[:active] = true unless opts[:include_inactive]
       User.find_by(find_opts)
     elsif params[:external_id]
-      SingleSignOnRecord.find_by(external_id: params[:external_id]).try(:user)
+      external_id = params[:external_id].gsub(/\.json$/, '')
+      SingleSignOnRecord.find_by(external_id: external_id).try(:user)
     end
-    raise Discourse::NotFound.new if user.blank?
+    raise Discourse::NotFound if user.blank?
 
     guardian.ensure_can_see!(user)
     user
@@ -260,6 +280,13 @@ class ApplicationController < ActionController::Base
     post_ids
   end
 
+  def no_cookies
+    # do your best to ensure response has no cookies
+    # longer term we may want to push this into middleware
+    headers.delete 'Set-Cookie'
+    request.session_options[:skip] = true
+  end
+
   private
 
     def preload_anonymous_data
@@ -272,7 +299,8 @@ class ApplicationController < ActionController::Base
 
     def preload_current_user_data
       store_preloaded("currentUser", MultiJson.dump(CurrentUserSerializer.new(current_user, scope: guardian, root: false)))
-      serializer = ActiveModel::ArraySerializer.new(TopicTrackingState.report([current_user.id]), each_serializer: TopicTrackingStateSerializer)
+      report = TopicTrackingState.report(current_user.id)
+      serializer = ActiveModel::ArraySerializer.new(report, each_serializer: TopicTrackingStateSerializer)
       store_preloaded("topicTrackingStates", MultiJson.dump(serializer))
     end
 
@@ -376,17 +404,22 @@ class ApplicationController < ActionController::Base
       raise Discourse::InvalidAccess.new unless current_user && current_user.staff?
     end
 
+    def destination_url
+      request.original_url unless request.original_url =~ /uploads/
+    end
+
     def redirect_to_login_if_required
       return if current_user || (request.format.json? && api_key_valid?)
-
-      # save original URL in a cookie
-      cookies[:destination_url] = request.original_url unless request.original_url =~ /uploads/
 
       # redirect user to the SSO page if we need to log in AND SSO is enabled
       if SiteSetting.login_required?
         if SiteSetting.enable_sso?
+          # save original URL in a session so we can redirect after login
+          session[:destination_url] = destination_url
           redirect_to path('/session/sso')
         else
+          # save original URL in a cookie (javascript redirects after login in this case)
+          cookies[:destination_url] = destination_url
           redirect_to :login
         end
       end
@@ -394,12 +427,12 @@ class ApplicationController < ActionController::Base
 
     def block_if_readonly_mode
       return if request.fullpath.start_with?(path "/admin/backups")
-      raise Discourse::ReadOnly.new if !request.get? && Discourse.readonly_mode?
+      raise Discourse::ReadOnly.new if !(request.get? || request.head?) && Discourse.readonly_mode?
     end
 
     def build_not_found_page(status=404, layout=false)
       category_topic_ids = Category.pluck(:topic_id).compact
-      @container_class = "container not-found-container"
+      @container_class = "wrap not-found-container"
       @top_viewed = Topic.where.not(id: category_topic_ids).top_viewed(10)
       @recent = Topic.where.not(id: category_topic_ids).recent(10)
       @slug =  params[:slug].class == String ? params[:slug] : ''

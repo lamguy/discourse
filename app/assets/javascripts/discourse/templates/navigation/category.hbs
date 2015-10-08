@@ -3,23 +3,24 @@
                noSubcategories=noSubcategories
                hideSubcategories=showingSubcategoryList}}
 
-<ul class="nav nav-pills" id='navigation-bar'>
-  {{#each navItem in navItems}}
-    {{navigation-item content=navItem filterMode=filterMode}}
-  {{/each}}
-  {{custom-html "extraNavItem"}}
-</ul>
+
+{{navigation-bar navItems=navItems filterMode=filterMode}}
 
 {{#if currentUser}}
   {{category-notifications-button category=category}}
 {{/if}}
 
 {{#if canCreateTopic}}
-  {{d-button id="create-topic" class="btn-default" action="createTopic" icon="plus" label="topic.create"}}
+  {{d-button  id="create-topic"
+              class="btn-default"
+              action="createTopic"
+              icon="plus"
+              label="topic.create"
+              disabled=cannotCreateTopicOnCategory}}
 {{/if}}
 
 {{#if canEditCategory}}
-  {{d-button class="btn-default" action="editCategory" actionParam=category icon="wrench" label="category.edit_long"}}
+  {{d-button class="btn-default edit-category" action="editCategory" actionParam=category icon="wrench" label="category.edit_long"}}
 {{/if}}
 
 <section class='category-heading'>
